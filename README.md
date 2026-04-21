@@ -9,12 +9,14 @@ Given a reference image and a video, FrameHunter finds the exact or closest time
 - Coarse-to-fine search strategy for speed and precision.
 - Keyframe-aware coarse scan (via `ffprobe`) when available.
 - Hybrid similarity model:
-	- ORB feature matching (robust to compression, moderate scale/color changes)
+	- ORB feature matching + geometric validation (RANSAC)
 	- SSIM (structural similarity)
 	- HSV histogram correlation (color distribution sanity check)
+	- pHash perceptual similarity
 - Handles approximate matches (compression, minor noise, color shifts).
 - Returns top-N matches with confidence and diagnostics.
 - Optional side-by-side visualization output.
+- Optional export of top-N matched frames to a directory.
 
 ## Architecture
 
@@ -83,6 +85,16 @@ python -m framehunter \
 	--visualize match_preview.jpg
 ```
 
+Export the top-N matched frames into a folder:
+
+```bash
+python -m framehunter \
+	--image frame.png \
+	--video video.mp4 \
+	--top-n 5 \
+	--export-top-frames-dir matched_frames
+```
+
 ## Docker (Cross-Platform)
 
 Run the tool the same way on macOS, Linux, or Windows (with Docker Desktop/Engine).
@@ -102,6 +114,7 @@ docker run --rm \
 	--image /data/frame.png \
 	--video /data/video.mp4 \
 	--top-n 5 \
+	--export-top-frames-dir /data/top_matches \
 	--visualize /data/match_preview.jpg
 ```
 
@@ -137,7 +150,10 @@ FrameHunter prints JSON:
 	"timestamp_human": "00:02:03.456",
 	"confidence": 0.87,
 	"method_used": "hybrid",
-	"notes": "coarse-to-fine hybrid (ORB + SSIM + HSV histogram)",
+	"notes": "coarse-to-fine hybrid (ORB-RANSAC + SSIM + HSV histogram + pHash)",
+	"exported_top_frames": [
+		"/data/top_matches/rank_01_00-14-17.399_0.7838.jpg"
+	],
 	"top_matches": [
 		{
 			"timestamp_seconds": 123.456,
@@ -149,12 +165,23 @@ FrameHunter prints JSON:
 				"orb": 0.84,
 				"ssim": 0.89,
 				"hist": 0.86,
+				"phash": 0.85,
 				"fps": 29.97
 			}
 		}
 	]
 }
 ```
+
+## First Test Result
+
+First validated Docker run result image:
+
+![First validation result](docs/results/first_validation_match.jpg)
+
+Reference media attribution:
+
+- Video source: João Pedro Pereira - Garoto | Stand-up Comedy
 
 ## Performance Notes
 

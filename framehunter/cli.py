@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import sys
 import time
 
@@ -66,6 +67,29 @@ def _save_visualization(image_path: str, video_path: str, ts: float, out_path: s
     cv2.imwrite(out_path, canvas)
 
 
+def _export_top_frames(video_path: str, top_matches: list[dict], out_dir: str) -> list[str]:
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    decoder = VideoDecoder(video_path)
+    exported: list[str] = []
+
+    for index, match in enumerate(top_matches, start=1):
+        ts = float(match.get("timestamp_seconds", 0.0))
+        conf = float(match.get("confidence", 0.0))
+        frame = decoder.get_frame_at_time(ts)
+        if frame is None:
+            continue
+
+        ts_label = match.get("timestamp_human", "00:00:00.000").replace(":", "-")
+        file_name = f"rank_{index:02d}_{ts_label}_{conf:.4f}.jpg"
+        file_path = out_path / file_name
+        ok = cv2.imwrite(str(file_path), frame)
+        if ok:
+            exported.append(str(file_path))
+
+    return exported
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="framehunter",
@@ -80,6 +104,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-keyframes", action="store_true", help="Disable keyframe-assisted coarse scan")
     parser.add_argument("--no-progress", action="store_true", help="Disable live CLI progress output")
     parser.add_argument("--visualize", help="Optional output image path for side-by-side reference vs best match")
+    parser.add_argument(
+        "--export-top-frames-dir",
+        help="Optional directory to export image files for the returned top-N matches",
+    )
     return parser.parse_args()
 
 
@@ -101,7 +129,12 @@ def main() -> int:
     if args.visualize:
         _save_visualization(args.image, args.video, result.timestamp_seconds, args.visualize)
 
-    print(json.dumps(result.as_json_dict(), indent=2))
+    payload = result.as_json_dict()
+    if args.export_top_frames_dir and result.top_matches:
+        exported = _export_top_frames(args.video, result.top_matches, args.export_top_frames_dir)
+        payload["exported_top_frames"] = exported
+
+    print(json.dumps(payload, indent=2))
     return 0
 
 
