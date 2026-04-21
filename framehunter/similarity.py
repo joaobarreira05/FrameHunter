@@ -111,12 +111,41 @@ def _complexity_penalty(image: np.ndarray) -> float:
     return 1.0
 
 
+def _apply_clahe(gray: np.ndarray) -> np.ndarray:
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    return clahe.apply(gray)
+
+
+def _blur_penalty(gray: np.ndarray) -> float:
+    # Laplacian variance as a proxy for blur.
+    # Blurry images have low variance in the second derivative.
+    var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    # If variance is very low (< 50), it's likely a blurry or flat frame.
+    if var < 40: return 0.2
+    if var < 100: return 0.6
+    if var < 250: return 0.85
+    return 1.0
+
+
 class HybridMatcher:
     def __init__(self, reference_bgr: np.ndarray, max_side: int = 800):
         self.reference = self._normalize_size(reference_bgr, max_side=max_side)
         self.reference_gray = to_gray(self.reference)
-        self.sift = cv2.SIFT_create(nfeatures=2000)
-        self.kp_ref, self.des_ref = self.sift.detectAndCompute(self.reference_gray, None)
+        # Apply CLAHE once to the reference
+        self.reference_gray_eh = _apply_clahe(self.reference_gray)
+        
+        # INDUSTRIAL: Increase features to 5000 for forensic matching
+        self.sift = cv2.SIFT_create(nfeatures=5000)
+        self.kp_ref, self.des_ref = self.sift.detectAndCompute(self.reference_gray_eh, None)
+
+        # INDUSTRIAL: Pre-compute pyramid for multi-scale template matching
+        self.ref_pyramid = []
+        for scale in [0.5, 0.75, 1.0, 1.25, 1.5]:
+            w = int(self.reference_gray_eh.shape[1] * scale)
+            h = int(self.reference_gray_eh.shape[0] * scale)
+            if w < 16 or h < 16: continue
+            resized = cv2.resize(self.reference_gray_eh, (w, h), interpolation=cv2.INTER_AREA)
+            self.ref_pyramid.append(resized)
 
     @staticmethod
     def _normalize_size(image: np.ndarray, max_side: int = 800) -> np.ndarray:
@@ -127,21 +156,43 @@ class HybridMatcher:
         return cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
     def _template_score(self, sample_gray: np.ndarray) -> float:
-        # Cross-correlation based template matching.
-        # Note: This is sensitive to scale and rotation but excellent for graphics check.
-        try:
-            res = cv2.matchTemplate(sample_gray, self.reference_gray, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, _ = cv2.minMaxLoc(res)
-            return float(np.clip(max_val, 0.0, 1.0))
-        except Exception:
-            return 0.0
+        # INDUSTRIAL: Pyramid Multi-Scale Template Matching
+        best_val = 0.0
+        for ref_scale in self.ref_pyramid:
+            try:
+                if ref_scale.shape[0] > sample_gray.shape[0] or ref_scale.shape[1] > sample_gray.shape[1]:
+                    continue
+                res = cv2.matchTemplate(sample_gray, ref_scale, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, _ = cv2.minMaxLoc(res)
+                best_val = max(best_val, float(max_val))
+            except Exception:
+                continue
+        return float(np.clip(best_val, 0.0, 1.0))
+
+    def _validate_homography(self, H: np.ndarray, ref_shape: tuple[int, int]) -> float:
+        # INDUSTRIAL: Check if the homography transformation is physically sane
+        if H is None: return 0.0
+        
+        # 1. Check Determinant (scaling factor). Should be positive and not too tiny or huge.
+        det = np.linalg.det(H[:2, :2])
+        if det <= 1e-6 or det > 25.0: return 0.0
+        
+        # 2. Check Corner transformation
+        h, w = ref_shape
+        pts = np.float32([[0, 0], [0, h], [w, h], [w, 0]]).reshape(-1, 1, 2)
+        dst = cv2.perspectiveTransform(pts, H)
+        
+        # Check if the polygon is convex (not a weird self-intersecting shape)
+        if not cv2.isContourConvex(dst.astype(np.int32)): return 0.2
+        
+        return 1.0
 
     def _sift_score(self, sample_gray: np.ndarray) -> float:
-        if self.des_ref is None or len(self.kp_ref) < 12:
+        if self.des_ref is None or len(self.kp_ref) < 15:
             return 0.0
 
         kp_s, des_s = self.sift.detectAndCompute(sample_gray, None)
-        if des_s is None or kp_s is None or len(kp_s) < 12:
+        if des_s is None or kp_s is None or len(kp_s) < 15:
             return 0.0
 
         matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
@@ -149,25 +200,27 @@ class HybridMatcher:
 
         good_matches = []
         for pair in knn:
-            if len(pair) < 2:
-                continue
+            if len(pair) < 2: continue
             m, n = pair
             if m.distance < 0.70 * n.distance:
                 good_matches.append(m)
 
-        if len(good_matches) < 12:
+        if len(good_matches) < 15:
             return 0.0
 
         ref_pts = np.float32([self.kp_ref[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
         sample_pts = np.float32([kp_s[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-        _, mask = cv2.findHomography(ref_pts, sample_pts, cv2.RANSAC, 5.0)
+        H, mask = cv2.findHomography(ref_pts, sample_pts, cv2.RANSAC, 5.0)
 
-        if mask is None:
+        if mask is None or H is None:
             return 0.0
 
+        # INDUSTRIAL: Geometric Veto
+        geo_valid = self._validate_homography(H, self.reference_gray.shape[:2])
+        if geo_valid < 0.5: return 0.0
+
         inliers = int(mask.ravel().sum())
-        # Stricter inlier requirement for graphics
-        if inliers < 12:
+        if inliers < 15:
             return 0.0
 
         inlier_ratio = inliers / max(1, len(good_matches))
@@ -183,7 +236,7 @@ class HybridMatcher:
         distance_quality = float(np.clip(distance_quality, 0.0, 1.0))
 
         score = 0.60 * inlier_ratio + 0.30 * support + 0.10 * distance_quality
-        return float(np.clip(score, 0.0, 1.0))
+        return float(np.clip(score * geo_valid, 0.0, 1.0))
 
     def compare(self, sample_bgr: np.ndarray) -> SimilarityResult:
         sample = self._normalize_size(sample_bgr)
@@ -191,25 +244,32 @@ class HybridMatcher:
             sample = cv2.resize(sample, (self.reference.shape[1], self.reference.shape[0]), interpolation=cv2.INTER_AREA)
 
         sample_gray = to_gray(sample)
-        sift = self._sift_score(sample_gray)
+        # Apply CLAHE to equalize the dynamic range of the sample
+        sample_gray_eh = _apply_clahe(sample_gray)
+        
+        sift = self._sift_score(sample_gray_eh)
         ssim = _compute_ssim(self.reference_gray, sample_gray)
         hist = _hist_corr_bgr(self.reference, sample)
         phash = _phash_similarity(self.reference_gray, sample_gray)
-        tmpl = self._template_score(sample_gray)
+        tmpl = self._template_score(sample_gray_eh)
         edge = _edge_similarity(self.reference_gray, sample_gray)
 
-        # Apply complexity penalty (multiplier)
-        penalty = _complexity_penalty(sample)
+        # Penalties
+        comp_p = _complexity_penalty(sample)
+        blur_p = _blur_penalty(sample_gray)
+        
+        # INDUSTRIAL: Geometric Veto (updated)
+        veto_p = 1.0
+        if sift > 0.10 and edge < 0.04 and tmpl < 0.25:
+            veto_p = 0.1
 
-        # Robust blending logic
+        # Improved blending logic: SIFT and Template are the masters
         if sift > 0.15:
-            # High confidence geometry match
-            score = 0.40 * sift + 0.20 * tmpl + 0.15 * ssim + 0.15 * edge + 0.10 * hist
+            score = 0.40 * sift + 0.25 * edge + 0.15 * tmpl + 0.10 * ssim + 0.10 * hist
         else:
-            # Structural/Correlation fallback
-            score = 0.35 * tmpl + 0.25 * ssim + 0.20 * edge + 0.15 * hist + 0.05 * phash
+            score = 0.40 * tmpl + 0.25 * edge + 0.20 * ssim + 0.10 * hist + 0.05 * phash
 
-        final_score = float(np.clip(score * penalty, 0.0, 1.0))
+        final_score = float(np.clip(score * comp_p * blur_p * veto_p, 0.0, 1.0))
 
         return SimilarityResult(
             score=final_score,
@@ -220,5 +280,4 @@ class HybridMatcher:
             tmpl_score=tmpl,
             edge_score=edge,
         )
-
 

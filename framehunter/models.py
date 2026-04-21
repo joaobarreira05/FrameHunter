@@ -6,12 +6,13 @@ from typing import Any
 
 @dataclass(slots=True)
 class SearchConfig:
-    coarse_interval_sec: float = 2.0
+    coarse_interval_sec: float = 0.2
     refine_window_sec: float = 3.0
-    top_n: int = 5
-    max_coarse_samples: int = 5000
+    top_n: int = 10
+    max_coarse_samples: int = 50000
     use_keyframes: bool = True
-    max_refine_regions: int = 8
+    max_refine_regions: int = 40
+
 
 
 @dataclass(slots=True)

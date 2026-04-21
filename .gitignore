@@ -7,4 +7,4 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
-.ruff_cache/
+.ruff_cache/GIT_WORKFLOW_GUIDE.md

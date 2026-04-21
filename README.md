@@ -177,41 +177,38 @@ FrameHunter prints JSON:
 }
 ```
 
-## First Test Result
+## Result Examples
 
-First validated Docker run result image:
-
+### Standard Validation
 ![First validation result](docs/results/first_validation_match.jpg)
+
+### Industrial Forensic Validation (Exhaustive Scan)
+![Industrial validation result](docs/results/industrial_validation_match.jpg)
 
 Reference media attribution:
 
 - Video source: João Pedro Pereira - Garoto | Stand-up Comedy
+- Video source (Industrial): `このメドレーのこの部分が好きなのでここだけ作りました！合作＋ ADVANCED` (CTF Challenge)
 
-## Performance Notes
+## Usage
 
-- Coarse pass combines interval sampling and keyframe timestamps.
-- Refine pass only decodes around best coarse candidates.
-- Keep `--coarse-interval` larger for huge videos; lower it for precision.
-- Increase `--refine-window` when the coarse stage may land far from the true frame.
+### Fast Search
+```bash
+python -m framehunter --image frame.png --video video.mp4
+```
 
-## Edge Cases
-
-- Frame absent: returns best approximate timestamp with low confidence.
-- Heavy transformations: SIFT provides strong resilience to scale and rotation; SSIM + histogram provide a fallback.
-- Variable FPS: timestamp-based probing and frame-index refinement are both used.
-
-
-## Contributing
-
-Contributions are welcome! If you want to improve FrameHunter, follow these steps:
-
-1. **Fork** the repository.
-2. **Create a new branch** for your feature or bugfix: `git checkout -b feature/your-feature-name`.
-3. **Commit** your changes with a clear message: `git commit -m "feat: add robust edge detection fallback"`.
-4. **Push** to your fork: `git push origin feature/your-feature-name`.
-5. **Open a Pull Request** (PR) detailing your changes and why they are needed.
-
-Please ensure your code follows the existing style and includes tests if applicable.
+### Exhaustive Forensic Scan (Highest Accuracy)
+Use this when precision is the only priority. This performs a dense 0.1s interval scan with pyramid matching.
+```bash
+python -m framehunter \
+	--image frame.png \
+	--video video.mp4 \
+	--top-n 5 \
+	--coarse-interval 0.1 \
+	--refine-window 2.0 \
+	--visualize match_result.jpg
+```
 
 ---
 Created with ❤️ for the CTF and Forensic community.
+
