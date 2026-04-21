@@ -1,12 +1,14 @@
 # FrameHunter
 
-High-performance frame-to-video timestamp finder for CTF and forensic workflows.
+High-performance frame-to-video timestamp finder for CTF and forensic workflows. Supports local video files (MP4, AVI, etc.) and **direct YouTube/Online URLs**.
 
-Given a reference image and a video, FrameHunter finds the exact or closest timestamp where that frame appears.
+Given a reference image and a video (file or URL), FrameHunter finds the exact or closest timestamp where that frame appears.
 
 ## Features
 
+- **Local & Online Support**: Accepts video files or direct links (YouTube, etc.).
 - Coarse-to-fine search strategy for speed and precision.
+
 - Keyframe-aware coarse scan (via `ffprobe`) when available.
 - Hybrid similarity model:
 	- SIFT feature matching + geometric validation (RANSAC)
