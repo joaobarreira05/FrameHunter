@@ -123,6 +123,8 @@ class FrameHunter:
                     "ssim": sim.ssim_score,
                     "hist": sim.hist_score,
                     "phash": sim.phash_score,
+                    "tmpl": sim.tmpl_score,
+                    "edge": sim.edge_score,
                 },
             )
             self._push_candidate(candidate_heap, cand, keep=max(20, top_n * 8))
@@ -180,9 +182,12 @@ class FrameHunter:
                         "ssim": sim.ssim_score,
                         "hist": sim.hist_score,
                         "phash": sim.phash_score,
+                        "tmpl": sim.tmpl_score,
+                        "edge": sim.edge_score,
                         "fps": fps,
                     },
                 )
+
                 self._push_candidate(candidate_heap, cand, keep=max(50, top_n * 12))
                 if progress_callback and (fine_done % 5 == 0 or fine_done >= fine_total):
                     progress_callback("fine", fine_done, max(1, fine_total))

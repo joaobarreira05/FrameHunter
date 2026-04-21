@@ -10,9 +10,13 @@ Given a reference image and a video, FrameHunter finds the exact or closest time
 - Keyframe-aware coarse scan (via `ffprobe`) when available.
 - Hybrid similarity model:
 	- SIFT feature matching + geometric validation (RANSAC)
+	- **Normalized Template Matching** (for clean graphics and logos)
+	- **Edge-based Shape Similarity** (robust to lighting/color shifts)
 	- SSIM (structural similarity)
 	- HSV histogram correlation (color distribution sanity check)
 	- pHash perceptual similarity
+- **Complexity/Entropy Filtering**: Automatically penalizes "flat" frames (e.g., white/black screens) to prevent false positives.
+
 - Handles approximate matches (compression, minor noise, color shifts).
 - Returns top-N matches with confidence and diagnostics.
 - Optional side-by-side visualization output.
