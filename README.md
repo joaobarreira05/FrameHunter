@@ -185,10 +185,15 @@ FrameHunter prints JSON:
 ### Industrial Forensic Validation (Exhaustive Scan)
 ![Industrial validation result](docs/results/industrial_validation_match.jpg)
 
+### Forensic Detection (Bright/Blurred Scenes)
+![Forensic validation result](docs/results/forensic_validation_match.jpg)
+
 Reference media attribution:
 
 - Video source: João Pedro Pereira - Garoto | Stand-up Comedy
 - Video source (Industrial): `このメドレーのこの部分が好きなのでここだけ作りました！合作＋ ADVANCED` (CTF Challenge)
+- Video source (Forensic): `Live API Hacking: OpenVault Bank | AMA | Learning With A Hacker EP 2` (CIT CTF)
+
 
 ## Usage
 
