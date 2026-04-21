@@ -1,0 +1,10 @@
+services:
+  framehunter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: framehunter:latest
+    working_dir: /data
+    volumes:
+      - ./testes:/data
+    entrypoint: ["framehunter"]

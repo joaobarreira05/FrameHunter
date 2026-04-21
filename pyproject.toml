@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "framehunter"
+version = "0.1.0"
+description = "CTF/forensics frame-to-video timestamp finder"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24.0",
+  "opencv-python>=4.8.0",
+]
+
+[project.scripts]
+framehunter = "framehunter.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["framehunter*"]
+exclude = ["testes*"]
