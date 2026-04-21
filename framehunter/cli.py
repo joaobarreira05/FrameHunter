@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
+import tempfile
+import shutil
 
 import cv2
 
+from .downloader import download_video
 from .models import SearchConfig
 from .search import FrameHunter
 from .utils import load_image_bgr, resize_keep_aspect
@@ -122,20 +125,41 @@ def main() -> int:
         use_keyframes=not args.no_keyframes,
     )
 
-    hunter = FrameHunter(config=config)
-    progress_cb = None if args.no_progress else _ProgressRenderer()
-    result = hunter.search(args.image, args.video, top_n=config.top_n, progress_callback=progress_cb)
+    video_path = args.video
+    tmp_dir = None
 
-    if args.visualize:
-        _save_visualization(args.image, args.video, result.timestamp_seconds, args.visualize)
+    # URL detection
+    if video_path.startswith(("http://", "https://", "www.")):
+        try:
+            tmp_dir = tempfile.mkdtemp(prefix="framehunter_dl_")
+            video_path = download_video(video_path, tmp_dir)
+        except Exception as e:
+            print(f"[!] Error downloading video: {e}", file=sys.stderr)
+            if tmp_dir:
+                shutil.rmtree(tmp_dir)
+            return 1
 
-    payload = result.as_json_dict()
-    if args.export_top_frames_dir and result.top_matches:
-        exported = _export_top_frames(args.video, result.top_matches, args.export_top_frames_dir)
-        payload["exported_top_frames"] = exported
+    try:
+        hunter = FrameHunter(config=config)
+        progress_cb = None if args.no_progress else _ProgressRenderer()
+        result = hunter.search(args.image, video_path, top_n=config.top_n, progress_callback=progress_cb)
 
-    print(json.dumps(payload, indent=2))
-    return 0
+        if args.visualize:
+            _save_visualization(args.image, video_path, result.timestamp_seconds, args.visualize)
+
+        payload = result.as_json_dict()
+        if args.export_top_frames_dir and result.top_matches:
+            exported = _export_top_frames(video_path, result.top_matches, args.export_top_frames_dir)
+            payload["exported_top_frames"] = exported
+
+        print(json.dumps(payload, indent=2))
+        return 0
+    finally:
+        if tmp_dir:
+            try:
+                shutil.rmtree(tmp_dir)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

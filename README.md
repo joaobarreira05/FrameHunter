@@ -202,6 +202,12 @@ Reference media attribution:
 python -m framehunter --image frame.png --video video.mp4
 ```
 
+### YouTube / Online Video Support
+FrameHunter now supports direct URLs (YouTube, etc.). The video will be automatically downloaded and processed.
+```bash
+python -m framehunter --image image.png --video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
 ### Exhaustive Forensic Scan (Highest Accuracy)
 Use this when precision is the only priority. This performs a dense 0.1s interval scan with pyramid matching.
 ```bash
@@ -213,6 +219,7 @@ python -m framehunter \
 	--refine-window 2.0 \
 	--visualize match_result.jpg
 ```
+
 
 ---
 Created with ❤️ for the CTF and Forensic community.
