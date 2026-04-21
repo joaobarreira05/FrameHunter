@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "framehunter"
 version = "0.1.0"
-description = "CTF/forensics frame-to-video timestamp finder"
+description = "CTF/OSINT frame-to-video timestamp finder"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

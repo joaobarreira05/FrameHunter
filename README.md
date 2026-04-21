@@ -1,6 +1,6 @@
 # FrameHunter
 
-High-performance frame-to-video timestamp finder for CTF and forensic workflows. Supports local video files (MP4, AVI, etc.) and **direct YouTube/Online URLs**.
+High-performance frame-to-video timestamp finder for CTF and OSINT workflows. Supports local video files (MP4, AVI, etc.) and **direct YouTube/Online URLs**.
 
 Given a reference image and a video (file or URL), FrameHunter finds the exact or closest timestamp where that frame appears.
 
@@ -184,17 +184,17 @@ FrameHunter prints JSON:
 ### Standard Validation
 ![First validation result](docs/results/first_validation_match.jpg)
 
-### Industrial Forensic Validation (Exhaustive Scan)
+### Industrial OSINT Validation (Exhaustive Scan)
 ![Industrial validation result](docs/results/industrial_validation_match.jpg)
 
-### Forensic Detection (Bright/Blurred Scenes)
-![Forensic validation result](docs/results/forensic_validation_match.jpg)
+### OSINT Detection (Bright/Blurred Scenes)
+![OSINT validation result](docs/results/forensic_validation_match.jpg)
 
 Reference media attribution:
 
 - Video source: João Pedro Pereira - Garoto | Stand-up Comedy
 - Video source (Industrial): `このメドレーのこの部分が好きなのでここだけ作りました！合作＋ ADVANCED` (CTF Challenge)
-- Video source (Forensic): `Live API Hacking: OpenVault Bank | AMA | Learning With A Hacker EP 2` (CIT CTF)
+- Video source (OSINT): `Live API Hacking: OpenVault Bank | AMA | Learning With A Hacker EP 2` (CIT CTF)
 
 
 ## Usage
@@ -210,7 +210,7 @@ FrameHunter now supports direct URLs (YouTube, etc.). The video will be automati
 python -m framehunter --image image.png --video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
 
-### Exhaustive Forensic Scan (Highest Accuracy)
+### Exhaustive OSINT Scan (Highest Accuracy)
 Use this when precision is the only priority. This performs a dense 0.1s interval scan with pyramid matching.
 ```bash
 python -m framehunter \
@@ -224,5 +224,5 @@ python -m framehunter \
 
 
 ---
-Created with ❤️ for the CTF and Forensic community.
+Created with ❤️ for the CTF and OSINT community.
 
