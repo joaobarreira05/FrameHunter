@@ -131,25 +131,31 @@ def _blur_penalty(gray: np.ndarray) -> float:
 
 
 class HybridMatcher:
-    def __init__(self, reference_bgr: np.ndarray, max_side: int = 800):
+    def __init__(self, reference_bgr: np.ndarray, max_side: int = 800, fast_mode: bool = False):
+        self.fast_mode = fast_mode
         self.reference = self._normalize_size(reference_bgr, max_side=max_side)
         self.reference_gray = to_gray(self.reference)
         # Apply CLAHE once to the reference
         self.reference_gray_eh = _apply_clahe(self.reference_gray)
         
-        # INDUSTRIAL: Increase features to 5000 for forensic matching
-        self.sift = cv2.SIFT_create(nfeatures=5000)
+        # INDUSTRIAL: Adaptive feature count
+        n_features = 500 if fast_mode else 5000
+        self.sift = cv2.SIFT_create(nfeatures=n_features)
         self.kp_ref, self.des_ref = self.sift.detectAndCompute(self.reference_gray_eh, None)
 
-        # INDUSTRIAL: Pre-compute pyramid for multi-scale template matching
+        # INDUSTRIAL: Pre-compute pyramid only if NOT in fast_mode
         self.ref_pyramid = []
-        for scale in [0.5, 0.75, 1.0, 1.25, 1.5]:
-            w = int(self.reference_gray_eh.shape[1] * scale)
-            h = int(self.reference_gray_eh.shape[0] * scale)
-            if w < 16 or h < 16:
-                continue
-            resized = cv2.resize(self.reference_gray_eh, (w, h), interpolation=cv2.INTER_AREA)
-            self.ref_pyramid.append(resized)
+        if not fast_mode:
+            for scale in [0.5, 0.75, 1.0, 1.25, 1.5]:
+                w = int(self.reference_gray_eh.shape[1] * scale)
+                h = int(self.reference_gray_eh.shape[0] * scale)
+                if w < 16 or h < 16:
+                    continue
+                resized = cv2.resize(self.reference_gray_eh, (w, h), interpolation=cv2.INTER_AREA)
+                self.ref_pyramid.append(resized)
+        else:
+            # In fast mode, the "pyramid" is just the original scale for compatibility
+            self.ref_pyramid = [self.reference_gray_eh]
 
     @staticmethod
     def _normalize_size(image: np.ndarray, max_side: int = 800) -> np.ndarray:

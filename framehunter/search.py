@@ -1,8 +1,11 @@
-from __future__ import annotations
-
 import heapq
+import multiprocessing as mp
+import os
+import sys
 from collections.abc import Callable
+from functools import partial
 
+import cv2
 import numpy as np
 
 from .models import Candidate, MatchResult, SearchConfig
@@ -36,16 +39,49 @@ def _select_diverse_candidates(
             selected.append(cand)
             if len(selected) >= max_count:
                 break
-
-    # Backfill if the timeline is dense and we could not satisfy the gap constraint.
     if len(selected) < max_count:
         for cand in candidates:
-            if cand in selected:
-                continue
+            if cand in selected: continue
             selected.append(cand)
-            if len(selected) >= max_count:
-                break
+            if len(selected) >= max_count: break
     return selected
+
+
+def _coarse_worker(
+    timestamps: list[float],
+    image_path: str,
+    video_path: str,
+    fast_mode: bool,
+) -> list[Candidate]:
+    # Disable OpenCV's internal threading to avoid conflict with multiprocessing
+    cv2.setNumThreads(0)
+    
+    ref = resize_keep_aspect(load_image_bgr(image_path), max_side=800)
+    matcher = HybridMatcher(ref, max_side=800, fast_mode=fast_mode)
+    decoder = VideoDecoder(video_path)
+    
+    results = []
+    for ts in timestamps:
+        frame = decoder.get_frame_at_time(ts)
+        if frame is None:
+            continue
+        sim = matcher.compare(frame)
+        cand = Candidate(
+            timestamp_seconds=float(ts),
+            score=sim.score,
+            method="hybrid",
+            diagnostics={
+                "stage": "coarse",
+                "sift": sim.sift_score,
+                "ssim": sim.ssim_score,
+                "hist": sim.hist_score,
+                "phash": sim.phash_score,
+                "tmpl": sim.tmpl_score,
+                "edge": sim.edge_score,
+            },
+        )
+        results.append(cand)
+    return results
 
 
 class FrameHunter:
@@ -91,85 +127,94 @@ class FrameHunter:
         image_path: str,
         video_path: str,
         top_n: int | None = None,
+        workers: int | None = None,
+        fast_mode_coarse: bool = False,
         progress_callback: Callable[[str, int, int], None] | None = None,
+        live_callback: Callable[[MatchResult], None] | None = None,
     ) -> MatchResult:
         top_n = top_n if top_n is not None else self.config.top_n
+        if workers is None:
+            workers = max(1, os.cpu_count() - 1)
 
-        ref = resize_keep_aspect(load_image_bgr(image_path), max_side=800)
-        decoder = VideoDecoder(video_path)
-        matcher = HybridMatcher(ref, max_side=800)
-
-        coarse_points = self._build_coarse_timestamps(decoder)
-        candidate_heap: list[tuple[float, int, Candidate]] = []
-
+        coarse_points = self._build_coarse_timestamps(VideoDecoder(video_path))
         coarse_total = len(coarse_points)
+        candidate_heap: list[tuple[float, int, Candidate]] = []
+        best_overall: Candidate | None = None
+
+        def update_best(new_cand: Candidate):
+            nonlocal best_overall
+            if best_overall is None or new_cand.score > best_overall.score:
+                best_overall = new_cand
+                if live_callback:
+                    # Construct a temporary MatchResult for the live update
+                    res = MatchResult(
+                        timestamp_seconds=new_cand.timestamp_seconds,
+                        timestamp_human=format_timestamp(new_cand.timestamp_seconds),
+                        confidence=new_cand.score,
+                        method_used=new_cand.method,
+                        notes=f"Live update from {new_cand.diagnostics['stage']} stage",
+                        top_matches=[],
+                    )
+                    live_callback(res)
+
         if progress_callback:
             progress_callback("coarse", 0, max(1, coarse_total))
 
-        for i, ts in enumerate(coarse_points, start=1):
-            frame = decoder.get_frame_at_time(ts)
-            if frame is None:
-                if progress_callback:
-                    progress_callback("coarse", i, max(1, coarse_total))
-                continue
-            sim = matcher.compare(frame)
-            cand = Candidate(
-                timestamp_seconds=float(ts),
-                score=sim.score,
-                method="hybrid",
-                diagnostics={
-                    "stage": "coarse",
-                    "sift": sim.sift_score,
-                    "ssim": sim.ssim_score,
-                    "hist": sim.hist_score,
-                    "phash": sim.phash_score,
-                    "tmpl": sim.tmpl_score,
-                    "edge": sim.edge_score,
-                },
-            )
-            self._push_candidate(candidate_heap, cand, keep=max(20, top_n * 8))
-            if progress_callback:
-                progress_callback("coarse", i, max(1, coarse_total))
+        if workers > 1 and coarse_total > workers:
+            chunk_size = max(1, coarse_total // (workers * 4))
+            chunks = [coarse_points[i:i + chunk_size] for i in range(0, coarse_total, chunk_size)]
+            worker_fn = partial(_coarse_worker, image_path=image_path, video_path=video_path, fast_mode=fast_mode_coarse)
+            
+            processed_count = 0
+            with mp.Pool(processes=workers) as pool:
+                for chunk_results in pool.imap_unordered(worker_fn, chunks):
+                    for cand in chunk_results:
+                        self._push_candidate(candidate_heap, cand, keep=max(30, top_n * 10))
+                        update_best(cand)
+                    
+                    processed_count += len(chunk_results)
+                    if progress_callback:
+                        progress_callback("coarse", min(processed_count, coarse_total), max(1, coarse_total))
+        else:
+            ref = resize_keep_aspect(load_image_bgr(image_path), max_side=800)
+            matcher = HybridMatcher(ref, max_side=800, fast_mode=fast_mode_coarse)
+            decoder = VideoDecoder(video_path)
+            for i, ts in enumerate(coarse_points, start=1):
+                frame = decoder.get_frame_at_time(ts)
+                if frame is not None:
+                    sim = matcher.compare(frame)
+                    cand = Candidate(timestamp_seconds=float(ts), score=sim.score, method="hybrid", diagnostics={"stage": "coarse", "sift": sim.sift_score, "ssim": sim.ssim_score, "hist": sim.hist_score, "phash": sim.phash_score, "tmpl": sim.tmpl_score, "edge": sim.edge_score})
+                    self._push_candidate(candidate_heap, cand, keep=max(30, top_n * 10))
+                    update_best(cand)
+                if progress_callback: progress_callback("coarse", i, coarse_total)
 
         coarse_best = [c for _, _, c in sorted(candidate_heap, key=lambda x: x[0], reverse=True)]
         if not coarse_best:
-            if progress_callback:
-                progress_callback("done", 1, 1)
-            return MatchResult(
-                timestamp_seconds=0.0,
-                timestamp_human=format_timestamp(0.0),
-                confidence=0.0,
-                method_used="hybrid",
-                notes="No readable frames were found in the input video.",
-                top_matches=[],
-            )
+            if progress_callback: progress_callback("done", 1, 1)
+            return MatchResult(0.0, format_timestamp(0.0), 0.0, "hybrid", "No readable frames found.", [])
 
+        ref = resize_keep_aspect(load_image_bgr(image_path), max_side=800)
+        matcher = HybridMatcher(ref, max_side=800, fast_mode=False)
+        decoder = VideoDecoder(video_path)
         duration = decoder.info.duration_seconds
+        
         intervals = []
-        diverse_coarse = _select_diverse_candidates(
-            coarse_best,
-            max_count=self.config.max_refine_regions,
-            min_gap_sec=max(1.0, self.config.refine_window_sec),
-        )
+        diverse_coarse = _select_diverse_candidates(coarse_best, max_count=self.config.max_refine_regions, min_gap_sec=max(1.0, self.config.refine_window_sec))
         for cand in diverse_coarse:
             s = max(0.0, cand.timestamp_seconds - self.config.refine_window_sec)
             e = min(duration, cand.timestamp_seconds + self.config.refine_window_sec)
             intervals.append((s, e))
 
         intervals = _merge_intervals(intervals)
-
         fps = max(decoder.info.fps, 1.0)
-        frame_stride = 1
-        fine_total = 0
-        for start, end in intervals:
-            fine_total += max(0, int((end - start) * fps) + 1)
+        fine_total = sum(max(0, int((end - start) * fps) + 1) for start, end in intervals)
         fine_done = 0
 
         if progress_callback:
             progress_callback("fine", 0, max(1, fine_total))
 
         for start, end in intervals:
-            for ts, frame in decoder.iter_frames_between(start, end, frame_stride=frame_stride):
+            for ts, frame in decoder.iter_frames_between(start, end, frame_stride=1):
                 fine_done += 1
                 sim = matcher.compare(frame)
                 cand = Candidate(
@@ -177,60 +222,30 @@ class FrameHunter:
                     score=sim.score,
                     method="hybrid",
                     diagnostics={
-                        "stage": "fine",
-                        "sift": sim.sift_score,
-                        "ssim": sim.ssim_score,
-                        "hist": sim.hist_score,
-                        "phash": sim.phash_score,
-                        "tmpl": sim.tmpl_score,
-                        "edge": sim.edge_score,
-                        "fps": fps,
+                        "stage": "fine", "sift": sim.sift_score, "ssim": sim.ssim_score, "hist": sim.hist_score, "phash": sim.phash_score, "tmpl": sim.tmpl_score, "edge": sim.edge_score, "fps": fps,
                     },
                 )
+                self._push_candidate(candidate_heap, cand, keep=max(100, top_n * 20))
+                update_best(cand)
 
-                self._push_candidate(candidate_heap, cand, keep=max(50, top_n * 12))
-                if progress_callback and (fine_done % 5 == 0 or fine_done >= fine_total):
+                if progress_callback and (fine_done % 10 == 0 or fine_done >= fine_total):
                     progress_callback("fine", fine_done, max(1, fine_total))
 
         ranked = [c for _, _, c in sorted(candidate_heap, key=lambda x: x[0], reverse=True)]
-
         best = ranked[0]
         second = ranked[1] if len(ranked) > 1 else None
         margin = max(0.0, best.score - second.score) if second else best.score
         confidence = float(np.clip(0.75 * best.score + 0.25 * margin, 0.0, 1.0))
 
-        notes = "coarse-to-fine hybrid (SIFT-RANSAC + SSIM + HSV histogram + pHash)"
-
-        if confidence < 0.40:
-            notes += "; low confidence: frame may be absent or heavily transformed"
-
         top_matches = []
         seen = set()
         for c in ranked:
             t_rounded = round(c.timestamp_seconds, 3)
-            if t_rounded in seen:
-                continue
+            if t_rounded in seen: continue
             seen.add(t_rounded)
-            top_matches.append(
-                {
-                    "timestamp_seconds": c.timestamp_seconds,
-                    "timestamp_human": format_timestamp(c.timestamp_seconds),
-                    "confidence": c.score,
-                    "method_used": c.method,
-                    "diagnostics": c.diagnostics,
-                }
-            )
-            if len(top_matches) >= top_n:
-                break
+            top_matches.append({"timestamp_seconds": c.timestamp_seconds, "timestamp_human": format_timestamp(c.timestamp_seconds), "confidence": c.score, "method_used": c.method, "diagnostics": c.diagnostics})
+            if len(top_matches) >= top_n: break
 
-        result = MatchResult(
-            timestamp_seconds=best.timestamp_seconds,
-            timestamp_human=format_timestamp(best.timestamp_seconds),
-            confidence=confidence,
-            method_used=best.method,
-            notes=notes,
-            top_matches=top_matches,
-        )
-        if progress_callback:
-            progress_callback("done", 1, 1)
+        result = MatchResult(best.timestamp_seconds, format_timestamp(best.timestamp_seconds), confidence, best.method, f"coarse-to-fine parallel (workers={workers})", top_matches)
+        if progress_callback: progress_callback("done", 1, 1)
         return result

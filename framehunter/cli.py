@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
-import tempfile
-import shutil
 
 import cv2
 
 from .downloader import download_video
-from .models import SearchConfig
+from .models import MatchResult, SearchConfig
 from .search import FrameHunter
 from .utils import load_image_bgr, resize_keep_aspect
 from .video_decoder import VideoDecoder
@@ -106,6 +107,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-coarse", type=int, default=5000, help="Cap on coarse sample points")
     parser.add_argument("--no-keyframes", action="store_true", help="Disable keyframe-assisted coarse scan")
     parser.add_argument("--no-progress", action="store_true", help="Disable live CLI progress output")
+    parser.add_argument("--workers", type=int, help="Number of parallel worker processes (default: CPU cores - 1)")
+    parser.add_argument("--fast", action="store_true", help="Enable fast mode for coarse scan (fewer SIFT features, no pyramid)")
+    parser.add_argument("--live-best", help="Optional path to a JSON file to save the current best match in real-time")
     parser.add_argument("--visualize", help="Optional output image path for side-by-side reference vs best match")
     parser.add_argument(
         "--export-top-frames-dir",
@@ -139,10 +143,26 @@ def main() -> int:
                 shutil.rmtree(tmp_dir)
             return 1
 
+    def live_best_cb(res: MatchResult):
+        if args.live_best:
+            try:
+                with open(args.live_best, "w") as f:
+                    json.dump(res.as_json_dict(), f, indent=2)
+            except Exception:
+                pass
+
     try:
         hunter = FrameHunter(config=config)
         progress_cb = None if args.no_progress else _ProgressRenderer()
-        result = hunter.search(args.image, video_path, top_n=config.top_n, progress_callback=progress_cb)
+        result = hunter.search(
+            args.image,
+            video_path,
+            top_n=config.top_n,
+            workers=args.workers,
+            fast_mode_coarse=args.fast,
+            progress_callback=progress_cb,
+            live_callback=live_best_cb,
+        )
 
         if args.visualize:
             _save_visualization(args.image, video_path, result.timestamp_seconds, args.visualize)

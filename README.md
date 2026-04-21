@@ -210,15 +210,31 @@ FrameHunter now supports direct URLs (YouTube, etc.). The video will be automati
 python -m framehunter --image image.png --video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
 
-### Exhaustive OSINT Scan (Highest Accuracy)
-Use this when precision is the only priority. This performs a dense 0.1s interval scan with pyramid matching.
+### High-Performance Parallel Search
+FrameHunter now includes a multi-core engine to handle long videos at high speeds without sacrificing precision.
+
+```bash
+# Use 8 parallel workers and save live results to a JSON file
+python -m framehunter \
+	--image frame.png \
+	--video video.mp4 \
+	--workers 8 \
+	--live-best results/status.json
+```
+
+### Options & Flags
+- `--workers N`: Number of parallel processes. Defaults to `CPU cores - 1`.
+- `--fast`: Enables **Fast Coarse Scan**. Reduces SIFT features and disables pyramid matching during the initial pass (Extreme speed, recommended for quick checks).
+- `--live-best FILE.json`: Updates the specified file in real-time whenever a better match is found. Perfect for monitoring long-running scans.
+
+### Exhaustive OSINT Scan (Maximum Precision)
+For industrial-grade forensic work, run the default engine (exhaustive coarse + fine refinement) with multiple workers for the best speed/accuracy balance.
 ```bash
 python -m framehunter \
 	--image frame.png \
 	--video video.mp4 \
-	--top-n 5 \
+	--workers 8 \
 	--coarse-interval 0.1 \
-	--refine-window 2.0 \
 	--visualize match_result.jpg
 ```
 
