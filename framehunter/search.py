@@ -119,7 +119,7 @@ class FrameHunter:
                 method="hybrid",
                 diagnostics={
                     "stage": "coarse",
-                    "orb": sim.orb_score,
+                    "sift": sim.sift_score,
                     "ssim": sim.ssim_score,
                     "hist": sim.hist_score,
                     "phash": sim.phash_score,
@@ -176,7 +176,7 @@ class FrameHunter:
                     method="hybrid",
                     diagnostics={
                         "stage": "fine",
-                        "orb": sim.orb_score,
+                        "sift": sim.sift_score,
                         "ssim": sim.ssim_score,
                         "hist": sim.hist_score,
                         "phash": sim.phash_score,
@@ -194,7 +194,8 @@ class FrameHunter:
         margin = max(0.0, best.score - second.score) if second else best.score
         confidence = float(np.clip(0.75 * best.score + 0.25 * margin, 0.0, 1.0))
 
-        notes = "coarse-to-fine hybrid (ORB-RANSAC + SSIM + HSV histogram + pHash)"
+        notes = "coarse-to-fine hybrid (SIFT-RANSAC + SSIM + HSV histogram + pHash)"
+
         if confidence < 0.40:
             notes += "; low confidence: frame may be absent or heavily transformed"
 

@@ -11,7 +11,7 @@ from .utils import to_gray
 @dataclass(slots=True)
 class SimilarityResult:
     score: float
-    orb_score: float
+    sift_score: float
     ssim_score: float
     hist_score: float
     phash_score: float
@@ -27,6 +27,7 @@ def _compute_ssim(gray_a: np.ndarray, gray_b: np.ndarray) -> float:
     c1 = (0.01 * 255) ** 2
     c2 = (0.03 * 255) ** 2
 
+    # Using larger window for robustness against noise
     mu_a = cv2.GaussianBlur(a, (11, 11), 1.5)
     mu_b = cv2.GaussianBlur(b, (11, 11), 1.5)
 
@@ -48,6 +49,7 @@ def _compute_ssim(gray_a: np.ndarray, gray_b: np.ndarray) -> float:
 def _hist_corr_bgr(a: np.ndarray, b: np.ndarray) -> float:
     hsv_a = cv2.cvtColor(a, cv2.COLOR_BGR2HSV)
     hsv_b = cv2.cvtColor(b, cv2.COLOR_BGR2HSV)
+    # Using H and S channels for correlation
     hist_a = cv2.calcHist([hsv_a], [0, 1], None, [50, 60], [0, 180, 0, 256])
     hist_b = cv2.calcHist([hsv_b], [0, 1], None, [50, 60], [0, 180, 0, 256])
     cv2.normalize(hist_a, hist_a)
@@ -76,29 +78,30 @@ def _phash_similarity(gray_a: np.ndarray, gray_b: np.ndarray) -> float:
 
 
 class HybridMatcher:
-    def __init__(self, reference_bgr: np.ndarray, max_side: int = 640):
+    def __init__(self, reference_bgr: np.ndarray, max_side: int = 800):
         self.reference = self._normalize_size(reference_bgr, max_side=max_side)
         self.reference_gray = to_gray(self.reference)
-        self.orb = cv2.ORB_create(nfeatures=1800)
-        self.kp_ref, self.des_ref = self.orb.detectAndCompute(self.reference_gray, None)
+        # SIFT is more accurate for most tasks even if slightly slower.
+        self.sift = cv2.SIFT_create(nfeatures=2000)
+        self.kp_ref, self.des_ref = self.sift.detectAndCompute(self.reference_gray, None)
 
     @staticmethod
-    def _normalize_size(image: np.ndarray, max_side: int = 640) -> np.ndarray:
+    def _normalize_size(image: np.ndarray, max_side: int = 800) -> np.ndarray:
         h, w = image.shape[:2]
         if max(h, w) <= max_side:
             return image
         scale = max_side / float(max(h, w))
         return cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-    def _orb_score(self, sample_gray: np.ndarray) -> float:
-        if self.des_ref is None or len(self.kp_ref) < 8:
+    def _sift_score(self, sample_gray: np.ndarray) -> float:
+        if self.des_ref is None or len(self.kp_ref) < 4:
             return 0.0
 
-        kp_s, des_s = self.orb.detectAndCompute(sample_gray, None)
-        if des_s is None or kp_s is None or len(kp_s) < 8:
+        kp_s, des_s = self.sift.detectAndCompute(sample_gray, None)
+        if des_s is None or kp_s is None or len(kp_s) < 4:
             return 0.0
 
-        matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+        matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
         knn = matcher.knnMatch(self.des_ref, des_s, k=2)
 
         good_matches = []
@@ -106,10 +109,10 @@ class HybridMatcher:
             if len(pair) < 2:
                 continue
             m, n = pair
-            if m.distance < 0.75 * n.distance:
+            if m.distance < 0.70 * n.distance:  # Stricter ratio test for better quality
                 good_matches.append(m)
 
-        if len(good_matches) < 8:
+        if len(good_matches) < 4:
             return 0.0
 
         ref_pts = np.float32([self.kp_ref[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
@@ -120,19 +123,26 @@ class HybridMatcher:
             return 0.0
 
         inliers = int(mask.ravel().sum())
-        inlier_ratio = inliers / max(1, len(good_matches))
+        if inliers < 4:
+            return 0.0
 
+        inlier_ratio = inliers / max(1, len(good_matches))
         denom = max(1, min(len(self.kp_ref), len(kp_s)))
         support = inliers / denom
 
+        # Quality based on inlier distance (L2 for SIFT)
         inlier_dist = [m.distance for m, keep in zip(good_matches, mask.ravel()) if keep]
         if inlier_dist:
-            distance_quality = 1.0 - (float(np.median(inlier_dist)) / 100.0)
+            # SIFT distances are not 0-255 like ORB Hamming; they vary.
+            # We use a heuristic normalization.
+            avg_dist = float(np.median(inlier_dist))
+            distance_quality = 1.0 - (avg_dist / 400.0)
         else:
             distance_quality = 0.0
         distance_quality = float(np.clip(distance_quality, 0.0, 1.0))
 
-        score = 0.55 * inlier_ratio + 0.35 * support + 0.10 * distance_quality
+        # Weight RANSAC inliers heavily for geometric validation
+        score = 0.60 * inlier_ratio + 0.30 * support + 0.10 * distance_quality
         return float(np.clip(score, 0.0, 1.0))
 
     def compare(self, sample_bgr: np.ndarray) -> SimilarityResult:
@@ -141,21 +151,24 @@ class HybridMatcher:
             sample = cv2.resize(sample, (self.reference.shape[1], self.reference.shape[0]), interpolation=cv2.INTER_AREA)
 
         sample_gray = to_gray(sample)
-        orb = self._orb_score(sample_gray)
+        sift = self._sift_score(sample_gray)
         ssim = _compute_ssim(self.reference_gray, sample_gray)
         hist = _hist_corr_bgr(self.reference, sample)
         phash = _phash_similarity(self.reference_gray, sample_gray)
 
-        # Blend structure, keypoints, color and perceptual hash to improve robustness.
-        if orb > 0.0:
-            score = 0.40 * orb + 0.30 * ssim + 0.15 * hist + 0.15 * phash
+        # Boost score if we have strong geometric agreement.
+        if sift > 0.15:
+            # SIFT is powerful enough to be the primary signal
+            score = 0.50 * sift + 0.25 * ssim + 0.15 * hist + 0.10 * phash
         else:
-            score = 0.45 * ssim + 0.30 * hist + 0.25 * phash
+            # Fallback to structural and color metrics
+            score = 0.45 * ssim + 0.35 * hist + 0.20 * phash
 
         return SimilarityResult(
             score=float(np.clip(score, 0.0, 1.0)),
-            orb_score=orb,
+            sift_score=sift,
             ssim_score=ssim,
             hist_score=hist,
             phash_score=phash,
         )
+

@@ -9,7 +9,7 @@ Given a reference image and a video, FrameHunter finds the exact or closest time
 - Coarse-to-fine search strategy for speed and precision.
 - Keyframe-aware coarse scan (via `ffprobe`) when available.
 - Hybrid similarity model:
-	- ORB feature matching + geometric validation (RANSAC)
+	- SIFT feature matching + geometric validation (RANSAC)
 	- SSIM (structural similarity)
 	- HSV histogram correlation (color distribution sanity check)
 	- pHash perceptual similarity
@@ -150,7 +150,7 @@ FrameHunter prints JSON:
 	"timestamp_human": "00:02:03.456",
 	"confidence": 0.87,
 	"method_used": "hybrid",
-	"notes": "coarse-to-fine hybrid (ORB-RANSAC + SSIM + HSV histogram + pHash)",
+	"notes": "coarse-to-fine hybrid (SIFT-RANSAC + SSIM + HSV histogram + pHash)",
 	"exported_top_frames": [
 		"/data/top_matches/rank_01_00-14-17.399_0.7838.jpg"
 	],
@@ -162,7 +162,7 @@ FrameHunter prints JSON:
 			"method_used": "hybrid",
 			"diagnostics": {
 				"stage": "fine",
-				"orb": 0.84,
+				"sift": 0.84,
 				"ssim": 0.89,
 				"hist": 0.86,
 				"phash": 0.85,
@@ -193,12 +193,21 @@ Reference media attribution:
 ## Edge Cases
 
 - Frame absent: returns best approximate timestamp with low confidence.
-- Heavy transformations: ORB may degrade; SSIM + histogram still provide a fallback.
+- Heavy transformations: SIFT provides strong resilience to scale and rotation; SSIM + histogram provide a fallback.
 - Variable FPS: timestamp-based probing and frame-index refinement are both used.
 
-## Next Improvements
 
-- CLIP/CNN embedding backend for stronger semantic matching.
-- Batch mode for multiple query images.
-- Multi-process search workers for long videos.
-- Optional GPU-accelerated decode path.
+## Contributing
+
+Contributions are welcome! If you want to improve FrameHunter, follow these steps:
+
+1. **Fork** the repository.
+2. **Create a new branch** for your feature or bugfix: `git checkout -b feature/your-feature-name`.
+3. **Commit** your changes with a clear message: `git commit -m "feat: add robust edge detection fallback"`.
+4. **Push** to your fork: `git push origin feature/your-feature-name`.
+5. **Open a Pull Request** (PR) detailing your changes and why they are needed.
+
+Please ensure your code follows the existing style and includes tests if applicable.
+
+---
+Created with ❤️ for the CTF and Forensic community.
