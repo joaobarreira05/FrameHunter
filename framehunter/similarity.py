@@ -121,9 +121,12 @@ def _blur_penalty(gray: np.ndarray) -> float:
     # Blurry images have low variance in the second derivative.
     var = cv2.Laplacian(gray, cv2.CV_64F).var()
     # If variance is very low (< 50), it's likely a blurry or flat frame.
-    if var < 40: return 0.2
-    if var < 100: return 0.6
-    if var < 250: return 0.85
+    if var < 40:
+        return 0.2
+    if var < 100:
+        return 0.6
+    if var < 250:
+        return 0.85
     return 1.0
 
 
@@ -143,7 +146,8 @@ class HybridMatcher:
         for scale in [0.5, 0.75, 1.0, 1.25, 1.5]:
             w = int(self.reference_gray_eh.shape[1] * scale)
             h = int(self.reference_gray_eh.shape[0] * scale)
-            if w < 16 or h < 16: continue
+            if w < 16 or h < 16:
+                continue
             resized = cv2.resize(self.reference_gray_eh, (w, h), interpolation=cv2.INTER_AREA)
             self.ref_pyramid.append(resized)
 
@@ -171,11 +175,13 @@ class HybridMatcher:
 
     def _validate_homography(self, H: np.ndarray, ref_shape: tuple[int, int]) -> float:
         # INDUSTRIAL: Check if the homography transformation is physically sane
-        if H is None: return 0.0
+        if H is None:
+            return 0.0
         
         # 1. Check Determinant (scaling factor). Should be positive and not too tiny or huge.
         det = np.linalg.det(H[:2, :2])
-        if det <= 1e-6 or det > 25.0: return 0.0
+        if det <= 1e-6 or det > 25.0:
+            return 0.0
         
         # 2. Check Corner transformation
         h, w = ref_shape
@@ -183,7 +189,8 @@ class HybridMatcher:
         dst = cv2.perspectiveTransform(pts, H)
         
         # Check if the polygon is convex (not a weird self-intersecting shape)
-        if not cv2.isContourConvex(dst.astype(np.int32)): return 0.2
+        if not cv2.isContourConvex(dst.astype(np.int32)):
+            return 0.2
         
         return 1.0
 
@@ -200,7 +207,8 @@ class HybridMatcher:
 
         good_matches = []
         for pair in knn:
-            if len(pair) < 2: continue
+            if len(pair) < 2:
+                continue
             m, n = pair
             if m.distance < 0.70 * n.distance:
                 good_matches.append(m)
@@ -217,7 +225,8 @@ class HybridMatcher:
 
         # INDUSTRIAL: Geometric Veto
         geo_valid = self._validate_homography(H, self.reference_gray.shape[:2])
-        if geo_valid < 0.5: return 0.0
+        if geo_valid < 0.5:
+            return 0.0
 
         inliers = int(mask.ravel().sum())
         if inliers < 15:
