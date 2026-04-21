@@ -1,7 +1,6 @@
 import heapq
 import multiprocessing as mp
 import os
-import sys
 from collections.abc import Callable
 from functools import partial
 
@@ -41,9 +40,11 @@ def _select_diverse_candidates(
                 break
     if len(selected) < max_count:
         for cand in candidates:
-            if cand in selected: continue
+            if cand in selected:
+                continue
             selected.append(cand)
-            if len(selected) >= max_count: break
+            if len(selected) >= max_count:
+                break
     return selected
 
 
@@ -186,11 +187,13 @@ class FrameHunter:
                     cand = Candidate(timestamp_seconds=float(ts), score=sim.score, method="hybrid", diagnostics={"stage": "coarse", "sift": sim.sift_score, "ssim": sim.ssim_score, "hist": sim.hist_score, "phash": sim.phash_score, "tmpl": sim.tmpl_score, "edge": sim.edge_score})
                     self._push_candidate(candidate_heap, cand, keep=max(30, top_n * 10))
                     update_best(cand)
-                if progress_callback: progress_callback("coarse", i, coarse_total)
+                if progress_callback:
+                    progress_callback("coarse", i, coarse_total)
 
         coarse_best = [c for _, _, c in sorted(candidate_heap, key=lambda x: x[0], reverse=True)]
         if not coarse_best:
-            if progress_callback: progress_callback("done", 1, 1)
+            if progress_callback:
+                progress_callback("done", 1, 1)
             return MatchResult(0.0, format_timestamp(0.0), 0.0, "hybrid", "No readable frames found.", [])
 
         ref = resize_keep_aspect(load_image_bgr(image_path), max_side=800)
@@ -241,11 +244,14 @@ class FrameHunter:
         seen = set()
         for c in ranked:
             t_rounded = round(c.timestamp_seconds, 3)
-            if t_rounded in seen: continue
+            if t_rounded in seen:
+                continue
             seen.add(t_rounded)
             top_matches.append({"timestamp_seconds": c.timestamp_seconds, "timestamp_human": format_timestamp(c.timestamp_seconds), "confidence": c.score, "method_used": c.method, "diagnostics": c.diagnostics})
-            if len(top_matches) >= top_n: break
+            if len(top_matches) >= top_n:
+                break
 
         result = MatchResult(best.timestamp_seconds, format_timestamp(best.timestamp_seconds), confidence, best.method, f"coarse-to-fine parallel (workers={workers})", top_matches)
-        if progress_callback: progress_callback("done", 1, 1)
+        if progress_callback:
+            progress_callback("done", 1, 1)
         return result
